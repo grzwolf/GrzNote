@@ -94,15 +94,15 @@ public class MainActivity extends Activity {
                 public void onClick(DialogInterface dialog, int which) {
                     // 'are you sure'
                     AlertDialog.Builder builder = null;
-                    builder = new AlertDialog.Builder(MainActivity.this, android.R.style.Theme_Material_Dialog);
+                    builder = new AlertDialog.Builder(MainActivity.this);
                     builder.setTitle("Reset GrzNote");
                     builder.setMessage("\nAre you sure?");
-                    builder.setNegativeButton("Yes", new DialogInterface.OnClickListener() {
+                    builder.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface dialog, int which) {
                             resetRestartApp();
                         }
                     });
-                    builder.setPositiveButton("No", new DialogInterface.OnClickListener() {
+                    builder.setNegativeButton("No", new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface dialog, int which) {
                             dialog.dismiss();
                         }
@@ -435,7 +435,7 @@ public class MainActivity extends Activity {
     // simple AlertBuilder ok box
     void okBox(String title, String message) {
         AlertDialog.Builder builder = null;
-        builder = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog);
+        builder = new AlertDialog.Builder(this);
         builder.setTitle(title);
         builder.setMessage("\n" + message);
         builder.setPositiveButton("Ok", new DialogInterface.OnClickListener() {
@@ -453,7 +453,7 @@ public class MainActivity extends Activity {
             return;
         }
         AlertDialog.Builder builder = null;
-        builder = new AlertDialog.Builder(MainActivity.this, android.R.style.Theme_Material_Dialog);
+        builder = new AlertDialog.Builder(MainActivity.this);
         builder.setTitle(title);
         final int[] selected = {1};
         builder.setSingleChoiceItems(items, selected[0], new DialogInterface.OnClickListener() {
