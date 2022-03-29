@@ -1,5 +1,6 @@
 package com.grzwolf.grznote;
  
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
@@ -11,9 +12,11 @@ import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -24,6 +27,8 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
+import java.util.Timer;
+import java.util.TimerTask;
 
 import javax.crypto.Cipher;
 import javax.crypto.CipherInputStream;
@@ -42,49 +47,25 @@ public class MainActivity extends Activity {
     boolean  textEditorChanged = false;
     boolean  storageFileIsOpen = false;
     long     storageFileSize = 0;
+    boolean  appIsHardClosing = false;
+    boolean  wentThruOnCreate = false;
 
-    // app lifecycle
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-        this.setTitle("GrzNote " + BuildConfig.VERSION_NAME);
+    // pwd TIMEOUT timer: 2min = 120s = 120.000ms
+    static final long PWD_TIMEOUT = 120000;
+    Timer pwdTimer = null;
 
-        // active controls
-        exitButton = (Button) findViewById(R.id.exitButton);
-        saveButton = (Button) findViewById(R.id.saveButton);
-        openButton = (Button) findViewById(R.id.openButton);
-        textEditor = (EditText) findViewById(R.id.text);
-
-        // text editor change listener
-        textEditor.addTextChangedListener(new TextWatcher() {
-            public void afterTextChanged(Editable s) {
-                textEditorChanged = true;
-            }
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-            }
-        });
-
-        // initially start with file open dlg
-        openButton.performClick();
-
-        // friendly reminder
-        dontShowAgain("Your password is not stored anywhere.",
-                new CharSequence[] {"Don't show again", "Show again"},
-                "DontShowAgain");
-    }
-
-    // password and password error handling
+    // password
     String difficultPassword = "";
+
+    // 'password error' getter & setter organize its handling
     int errorCounterPassword = 0;
     public int getErrorCounterPassword() {
         return errorCounterPassword;
     }
-    public void setErrorCounterPassword(int errorCounterPassword) {
-        this.errorCounterPassword = errorCounterPassword;
+    public void setErrorCounterPassword(int counter) {
+        errorCounterPassword = counter;
         // > 5 pwd errors
-        if ( this.errorCounterPassword > 5 ) {
+        if ( errorCounterPassword > 5 ) {
             // now there are three choices ...
             AlertDialog.Builder adYesNoCont = new AlertDialog.Builder(this);
             adYesNoCont.setMessage("Error password > 5\n\nStart from scratch with a new data file and delete the old data file?");
@@ -99,6 +80,7 @@ public class MainActivity extends Activity {
                     builder.setMessage("\nAre you sure?");
                     builder.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface dialog, int which) {
+                            appIsHardClosing = true;
                             resetRestartApp();
                         }
                     });
@@ -125,6 +107,168 @@ public class MainActivity extends Activity {
                 }
             });
             adYesNoCont.show();
+        }
+    }
+
+    // app lifecycle
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        this.setTitle("GrzNote " + BuildConfig.VERSION_NAME);
+
+        // a flag is needed to distinguish, whether the app is really started OR just resumed
+        wentThruOnCreate = true;
+
+        // active controls
+        exitButton = (Button) findViewById(R.id.exitButton);
+        saveButton = (Button) findViewById(R.id.saveButton);
+        openButton = (Button) findViewById(R.id.openButton);
+        textEditor = (EditText) findViewById(R.id.text);
+
+        // text editor change listener
+        textEditor.addTextChangedListener(new TextWatcher() {
+            public void afterTextChanged(Editable s) {
+                // simple text editor change/dirty flag
+                textEditorChanged = true;
+                // user interaction happened
+                recordUserActivityTime();
+            }
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+        });
+
+        // text editor touch listener
+        textEditor.setOnTouchListener(new View.OnTouchListener() {
+            @SuppressLint("ClickableViewAccessibility")
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                if ( event.getAction() == MotionEvent.ACTION_DOWN ) {
+                    // user interaction happened
+                    if ( textEditor.isEnabled() ) {
+                        recordUserActivityTime();
+                    }
+                }
+                return false;
+            }
+        });
+
+        // initially start with file open dlg
+        openButton.performClick();
+
+        // friendly reminder
+        dontShowAgain("Your password is not stored anywhere.",
+                new CharSequence[] {"Don't show again", "Show again"},
+                "DontShowAgain");
+    }
+    @Override
+    protected void onResume() {
+        if ( wentThruOnCreate ) {
+            // only get here after fresh app start: once this is fact, there is no need anymore to keep the flag true
+            wentThruOnCreate = false;
+        } else {
+            // only get here after a pause --> resume: check whether pwd TIMEOUT is due
+            checkPwdTimeout(true);
+        }
+        super.onResume();
+    }
+    @Override
+    protected void onPause() {
+        // two cases when coming here:
+        if ( appIsHardClosing ) {
+            // 1.) hard close app after regular close button OR reset app after too many pwd fails
+            SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
+            SharedPreferences.Editor edit = preferences.edit();
+            edit.putLong("LatestUserActivityTime", -1);
+            edit.apply();
+        } else {
+            // 2.) simple pause shall record the time when it happens to allow a password expire TIMEOUT
+            textEditor.setText("");
+            textEditorChanged = false;
+            recordUserActivityTime();
+        }
+        super.onPause();
+    }
+
+    // record time of latest user activity
+    public void recordUserActivityTime() {
+        long time = System.currentTimeMillis();
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
+        SharedPreferences.Editor edit = preferences.edit();
+        edit.putLong("LatestUserActivityTime", time);
+        edit.apply();
+    }
+
+    // pwd timer
+    void startPwdTimer() {
+        if ( pwdTimer != null ) {
+            return;
+        }
+        pwdTimer = new Timer();
+        pwdTimer.scheduleAtFixedRate(new TimerTask() {
+            public void run() {
+                checkPwdTimeout(false);
+            }
+        }, 500, 10000);
+    }
+
+    // check whether the TIMEOUT has expired; openFile flag allows to open the storage file, if there is no pwd timeout
+    public void checkPwdTimeout(boolean openFile) {
+        // in case, there is now valid pwd, simply return
+        if ( difficultPassword.length() == 0 ) {
+            return;
+        }
+        // get time when the there was the last user activity, credits: https://stackoverflow.com/questions/576600/lock-android-app-after-a-certain-amount-of-idle-time
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
+        long pausedStart = preferences.getLong("LatestUserActivityTime", -1);
+        if ( pausedStart == -1 ) {
+            return;
+        }
+        // password TIMEOUT check
+        if ( System.currentTimeMillis() - pausedStart >= PWD_TIMEOUT ) {
+            // lock password & file status settings
+            resetPwd();
+        } else {
+            // simply show file content again: this path only happens after pause --> resume with no pwd timeout
+            if ( openFile ) {
+                openButton.performClick();
+            }
+        }
+    }
+
+    // reset: pwd timer, pwd, text editor content, file status + give message
+    void resetPwd() {
+        try {
+            // method is called from timer thread, therefore "runOnUiThread" is essential (otherwise foreign thread exception)
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    // stop pwd timer
+                    pwdTimer.cancel();
+                    pwdTimer = null;
+                    // avoid potential confusion after restart pwd timer
+                    SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
+                    SharedPreferences.Editor edit = preferences.edit();
+                    edit.putLong("LatestUserActivityTime", -1);
+                    edit.apply();
+                    // reset pwd
+                    difficultPassword = "";
+                    // reset text editor
+                    textEditor.setText("");
+                    textEditorChanged = false;
+                    textEditor.setEnabled(false);
+                    // reset file status
+                    storageFileIsOpen = false;
+                    storageFileSize = 0;
+                    // fire open file dlg (will ask for pwd, if ok starts pwd timer)
+                    openButton.performClick();
+                    // put TIMEOUT info on top of file open procedure
+                    okBox("Note", "Timeout > 2 minutes with no user activity.\n\nUnsaved changes are lost.");
+                }
+            });
+        } catch (Exception e) {
+            okBox("Exception", e.getMessage());
         }
     }
 
@@ -182,6 +326,8 @@ public class MainActivity extends Activity {
             adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
+                    // user interaction happened
+                    recordUserActivityTime();
                     // if there is no pwd, ask for it and use it
                     if ( difficultPassword.length() == 0 ) {
                         ad.setMessage("Type password");
@@ -192,20 +338,45 @@ public class MainActivity extends Activity {
                                 difficultPassword = pwdEditor.getText().toString();
                                 // make pwd somehow reasonable
                                 difficultPassword = pwdModder(difficultPassword);
-                                // apply pwd
-                                try {
-                                    // get clear text
-                                    String clearTextOut = textEditor.getText().toString();
-                                    // save encrypted text to file
-                                    encryptStorageFile(clearTextOut, difficultPassword);
-                                    // immediately re read encrypted data from file, decrypt it and show
-                                    openButton.performClick();
-                                    // if everything went well, the pwd error counter is reset
-                                    setErrorCounterPassword(0);
-                                } catch (IOException | NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException exc) {
-                                    setErrorCounterPassword(getErrorCounterPassword() + 1);
-                                    difficultPassword = "";
-                                    okBox("Error Password", "Something went wrong.");
+                                // get clear text
+                                String clearTextString = textEditor.getText().toString();
+                                // saving an empty text could be intentional, mostly isn't
+                                if ( clearTextString.length() == 0 ) {
+                                    AlertDialog.Builder adYesNo = new AlertDialog.Builder(MainActivity.this);
+                                    adYesNo.setMessage("Current text is empty. Continue anyway?");
+                                    adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
+                                        @Override
+                                        public void onClick(DialogInterface dialog, int which) {
+                                            try {
+                                                encryptStorageFile(clearTextString, difficultPassword);
+                                                openButton.performClick();
+                                            } catch (IOException |
+                                                    NoSuchAlgorithmException |
+                                                    NoSuchPaddingException |
+                                                    InvalidKeyException exc) {
+                                                difficultPassword = "";
+                                                okBox("Error", exc.getMessage());
+                                            }
+                                        }
+                                    });
+                                    adYesNo.setNegativeButton("No", new DialogInterface.OnClickListener() {
+                                        @Override
+                                        public void onClick(DialogInterface dialog, int which) {
+                                            dialog.cancel();
+                                        }
+                                    });
+                                    adYesNo.show();
+                                } else {
+                                    try {
+                                        encryptStorageFile(clearTextString, difficultPassword);
+                                        openButton.performClick();
+                                    } catch (IOException |
+                                            NoSuchAlgorithmException |
+                                            NoSuchPaddingException |
+                                            InvalidKeyException exc) {
+                                        difficultPassword = "";
+                                        okBox("Error", exc.getMessage());
+                                    }
                                 }
                             }
                         });
@@ -217,17 +388,48 @@ public class MainActivity extends Activity {
                             }
                         });
                         ad.show();
-                        // repeat welcome screen on top of the pwd dlg at first usage
+                        // repeat welcome screen on top of the pwd dlg only at first usage
                         firstDataUsage();
                     } else {
                         // if pwd is somehow ok, use it
-                        try {
-                            String clearTextString = textEditor.getText().toString();
-                            encryptStorageFile(clearTextString, difficultPassword);
-                            openButton.performClick();
-                        } catch (IOException | NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException exc) {
-                            difficultPassword = "";
-                            okBox("Error", exc.getMessage());
+                        String clearTextString = textEditor.getText().toString();
+                        // empty text check
+                        if ( clearTextString.length() == 0 ) {
+                            AlertDialog.Builder adYesNo = new AlertDialog.Builder(MainActivity.this);
+                            adYesNo.setMessage("Current text is empty. Continue anyway?");
+                            adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    try {
+                                        encryptStorageFile(clearTextString, difficultPassword);
+                                        openButton.performClick();
+                                    } catch (IOException |
+                                            NoSuchAlgorithmException |
+                                            NoSuchPaddingException |
+                                            InvalidKeyException exc) {
+                                        difficultPassword = "";
+                                        okBox("Error", exc.getMessage());
+                                    }
+                                }
+                            });
+                            adYesNo.setNegativeButton("No", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    dialog.cancel();
+                                }
+                            });
+                            adYesNo.show();
+                        } else {
+                            try {
+                                encryptStorageFile(clearTextString, difficultPassword);
+                                openButton.performClick();
+                            } catch (IOException |
+                                    NoSuchAlgorithmException |
+                                    NoSuchPaddingException |
+                                    InvalidKeyException exc) {
+                                difficultPassword = "";
+                                okBox("Error", exc.getMessage());
+                            }
                         }
                     }
                 }
@@ -243,6 +445,8 @@ public class MainActivity extends Activity {
 
         // decrypted file open handling
         if( v.getId() == R.id.openButton ) {
+            // user interaction happened
+            recordUserActivityTime();
             // if there is no pwd, ask for pwd, open file, decrypt it, show it as clear text in editor
             if ( difficultPassword.length() == 0 ) {
                 ad.setMessage("Type password");
@@ -262,7 +466,12 @@ public class MainActivity extends Activity {
                             storageFileIsOpen = true;
                             // enable text edit, when file data are shown
                             textEditor.setEnabled(true);
-                        } catch (IOException | NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException exc) {
+                            // pwd TIMEOUT timer
+                            startPwdTimer();
+                        } catch (IOException |
+                                NoSuchAlgorithmException |
+                                NoSuchPaddingException |
+                                InvalidKeyException exc) {
                             setErrorCounterPassword(getErrorCounterPassword() + 1);
                             difficultPassword = "";
                             okBox("Error Password", "Something went wrong.");
@@ -293,7 +502,10 @@ public class MainActivity extends Activity {
                                 textEditorChanged = false;
                                 storageFileIsOpen = true;
                                 textEditor.setEnabled(true);
-                            } catch (IOException | NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException exc) {
+                            } catch (IOException |
+                                    NoSuchAlgorithmException |
+                                    NoSuchPaddingException |
+                                    InvalidKeyException exc) {
                                 difficultPassword = "";
                                 okBox("Error Password", "Something went wrong.");
                             }
@@ -314,7 +526,10 @@ public class MainActivity extends Activity {
                         textEditorChanged = false;
                         storageFileIsOpen = true;
                         textEditor.setEnabled(true);
-                    } catch (IOException | NoSuchAlgorithmException | NoSuchPaddingException | InvalidKeyException exc) {
+                    } catch (IOException |
+                            NoSuchAlgorithmException |
+                            NoSuchPaddingException |
+                            InvalidKeyException exc) {
                         difficultPassword = "";
                         okBox("Error Password", "Something went wrong.");
                     }
@@ -324,13 +539,17 @@ public class MainActivity extends Activity {
 
         // close app - ask whether to save or not
         if ( v.getId() == R.id.exitButton ) {
+            // user interaction happened
+            recordUserActivityTime();
             // for the sake of mind
             AlertDialog.Builder adYesNo = new AlertDialog.Builder(this);
-            String text = textEditorChanged ? "This will fully close the app. Unsaved data will be lost." : "This will fully close the app, even from recent apps.";
+            String text = textEditorChanged ? "This will fully close the app." +
+                    "Unsaved data will be lost." : "This will fully close the app, even from recent apps.";
             adYesNo.setMessage(text + "\n\nContinue?");
             adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
+                    appIsHardClosing = true;
                     finishAndRemoveTask();
                 }
             });
@@ -345,27 +564,31 @@ public class MainActivity extends Activity {
     }
 
     // extend password to 16 chars
-    String pwdModder(String difficultPassword) {
+    String pwdModder(String password) {
         // if pwd is empty, return a definitely failing pwd instead
-        if ( difficultPassword.length() == 0 ) {
+        if ( password.length() == 0 ) {
             return "0";
         }
         // pwd length is too short OR too long OR length is ok
-        if ( difficultPassword.length() < 4 || difficultPassword.length() >= 16 ) {
-            return difficultPassword;
+        if ( password.length() < 4 || password.length() >= 16 ) {
+            return password;
         }
         // duplicate pwd until length of 16 chars is reached
-        while ( difficultPassword.length() < 16 ) {
-            difficultPassword += difficultPassword;
+        while ( password.length() < 16 ) {
+            password += password;
         }
-        difficultPassword = difficultPassword.substring(0, 16);
+        password = password.substring(0, 16);
         // return modded pwd
-        return difficultPassword;
+        return password;
     }
 
     // encrypt input text with given pwd and save it as app data file
     // credits: https://stackoverflow.com/questions/22863889/encrypt-decrypt-file-and-incorrect-data
-    void encryptStorageFile(String clearTextString, String MyDifficultPassw) throws IOException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException {
+    void encryptStorageFile(String clearTextString, String password) throws
+            IOException,
+            NoSuchAlgorithmException,
+            NoSuchPaddingException,
+            InvalidKeyException {
         // read the cleartext
         InputStream tis = new ByteArrayInputStream(clearTextString.getBytes(StandardCharsets.UTF_8));
         // stream to write the encrypted text to file
@@ -374,7 +597,7 @@ public class MainActivity extends Activity {
         String storageFileName = storagePath + "/" + appName;
         FileOutputStream fos = new FileOutputStream(storageFileName);
         // PWD length is 16 byte
-        SecretKeySpec sks = new SecretKeySpec(MyDifficultPassw.getBytes(), "AES");
+        SecretKeySpec sks = new SecretKeySpec(password.getBytes(), "AES");
         // create cipher
         Cipher cipher = Cipher.getInstance("AES");
         cipher.init(Cipher.ENCRYPT_MODE, sks);
@@ -398,10 +621,14 @@ public class MainActivity extends Activity {
     }
 
     // open app data file, decrypt it with given pwd and return it as string
-    String decryptStorageFile(String MyDifficultPassw) throws IOException, NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException {
+    String decryptStorageFile(String password) throws
+            IOException,
+            NoSuchAlgorithmException,
+            NoSuchPaddingException,
+            InvalidKeyException {
         String clearTextString = "";
 
-        SecretKeySpec sks = new SecretKeySpec(MyDifficultPassw.getBytes(), "AES");
+        SecretKeySpec sks = new SecretKeySpec(password.getBytes(), "AES");
         Cipher cipher = Cipher.getInstance("AES");
         cipher.init(Cipher.DECRYPT_MODE, sks);
 
@@ -483,7 +710,9 @@ public class MainActivity extends Activity {
         if ( !file.exists() || storageFileSize == 0 ) {
             // give a note about the magic password
             okBox("GrzNote first data usage",
-                    "Create a password.\nLength: 4 ... 16 characters.\n\nYou need to remember it, anytime you use this app.\n\nThe password is not stored anywhere.");
+                    "Create a password.\nLength: 4 ... 16 characters.\n\n" +
+                            "You need to remember it, anytime you use this app.\n\n" +
+                            "The password is not stored anywhere.");
         }
     }
 
