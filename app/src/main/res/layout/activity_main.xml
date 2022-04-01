@@ -9,17 +9,29 @@
         android:layout_height="0dp"
         android:layout_weight="9"
         android:orientation="vertical">
-
-         <EditText
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:inputType="textMultiLine"
-            android:gravity="top"
-            android:id="@+id/text"
-            android:scrollbars = "vertical"
-            android:enabled="false"
-            android:autofillHints="" />
-        </LinearLayout>
+        <ScrollView
+            android:id="@+id/scrollerMain"
+            android:layout_width="fill_parent"
+            android:layout_height="fill_parent"
+            android:scrollbars="vertical"
+            android:scrollbarAlwaysDrawVerticalTrack="true"
+            android:scrollbarStyle="insideInset"
+            android:overScrollMode="always"
+            android:fadeScrollbars="false"
+            android:scrollbarFadeDuration="0"
+            android:isScrollContainer="true"
+            android:fillViewport="true">
+            <EditText
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:inputType="textNoSuggestions|textMultiLine"
+                android:gravity="top"
+                android:id="@+id/text"
+                android:scrollbars = "vertical"
+                android:enabled="true"
+                android:autofillHints="" />
+        </ScrollView>
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -35,12 +47,12 @@
             android:onClick="buttonAction"/>
 
         <Button
+            android:id="@+id/saveButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Save"
-            android:id="@+id/saveButton"
+            android:layout_weight="1"
             android:onClick="buttonAction"
-            android:layout_weight="1"/>
+            android:text="Edit" />
 
         <Button
             android:id="@+id/exitButton"

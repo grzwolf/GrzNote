@@ -8,12 +8,15 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.PorterDuff;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 
@@ -49,6 +52,12 @@ public class MainActivity extends Activity {
     long     storageFileSize = 0;
     boolean  appIsHardClosing = false;
     boolean  wentThruOnCreate = false;
+
+    // indicate editor dirty flag as button text color
+    void setTextEditorChanged(boolean hasChanged) {
+        saveButton.setTextColor(hasChanged ? Color.RED : Color.BLACK);
+        textEditorChanged = hasChanged;
+    }
 
     // pwd TIMEOUT timer: 2min = 120s = 120.000ms
     static final long PWD_TIMEOUT = 120000;
@@ -130,7 +139,7 @@ public class MainActivity extends Activity {
         textEditor.addTextChangedListener(new TextWatcher() {
             public void afterTextChanged(Editable s) {
                 // simple text editor change/dirty flag
-                textEditorChanged = true;
+                setTextEditorChanged(true);
                 // user interaction happened
                 recordUserActivityTime();
             }
@@ -185,7 +194,7 @@ public class MainActivity extends Activity {
         } else {
             // 2.) simple pause shall record the time when it happens to allow a password expire TIMEOUT
             textEditor.setText("");
-            textEditorChanged = false;
+            setTextEditorChanged(false);
             recordUserActivityTime();
         }
         super.onPause();
@@ -256,8 +265,8 @@ public class MainActivity extends Activity {
                     difficultPassword = "";
                     // reset text editor
                     textEditor.setText("");
-                    textEditorChanged = false;
-                    textEditor.setEnabled(false);
+                    setTextEditorChanged(false);
+                    textEditorSetEnabled(false);
                     // reset file status
                     storageFileIsOpen = false;
                     storageFileSize = 0;
@@ -305,11 +314,18 @@ public class MainActivity extends Activity {
         AlertDialog.Builder ad = new AlertDialog.Builder(this);
         ad.setView(pwdEditor);
 
-        // save text from editor to file
+        // toggle: edit mode <--> save text from editor to file
         if ( v.getId() == R.id.saveButton ) {
 
-            // if editor is not enabled, there is nothing to save
-            if ( !textEditor.isEnabled() ) {
+            // user interaction
+            recordUserActivityTime();
+
+            // if editor is not yet enabled
+            if ( !textEditor.isFocusable() ) {
+                // if file is open, toggle button text from "Edit" to "Save" and enable edit mode
+                if ( storageFileIsOpen ) {
+                    textEditorSetEnabled(true);
+                }
                 return;
             }
 
@@ -320,10 +336,16 @@ public class MainActivity extends Activity {
                 return;
             }
 
+            // nothing to save, just re open file
+            if ( !textEditorChanged ) {
+                openButton.performClick();
+                return;
+            }
+
             // for the sake of mind
-            AlertDialog.Builder adYesNo = new AlertDialog.Builder(this);
-            adYesNo.setMessage("The current text will be saved to the data file.\n\nContinue?");
-            adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
+            AlertDialog.Builder adYesNoCancel = new AlertDialog.Builder(this);
+            adYesNoCancel.setMessage("The current text will be saved to the data file.\n\nYes       = save changes\nCancel = continue edit\nNo         = discard changes");
+            adYesNoCancel.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
                     // user interaction happened
@@ -434,13 +456,20 @@ public class MainActivity extends Activity {
                     }
                 }
             });
-            adYesNo.setNegativeButton("No", new DialogInterface.OnClickListener() {
+            adYesNoCancel.setNegativeButton("No", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    openButton.performClick();
+                    dialog.cancel();
+                }
+            });
+            adYesNoCancel.setNeutralButton("Cancel", new DialogInterface.OnClickListener() {
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
                     dialog.cancel();
                 }
             });
-            adYesNo.show();
+            adYesNoCancel.show();
         }
 
         // decrypted file open handling
@@ -461,11 +490,11 @@ public class MainActivity extends Activity {
                             setErrorCounterPassword(0);
                             textEditor.setText(clearText);
                             // clear editor dirty flag after setting the data to editor from file
-                            textEditorChanged = false;
+                            setTextEditorChanged(false);
                             // data storage file is now open
                             storageFileIsOpen = true;
-                            // enable text edit, when file data are shown
-                            textEditor.setEnabled(true);
+                            // disable edit mode after file open & toggle 'Save/Edit' button text to "Edit"
+                            textEditorSetEnabled(false);
                             // pwd TIMEOUT timer
                             startPwdTimer();
                         } catch (IOException |
@@ -499,9 +528,9 @@ public class MainActivity extends Activity {
                             try {
                                 String clearText = decryptStorageFile(difficultPassword);
                                 textEditor.setText(clearText);
-                                textEditorChanged = false;
+                                setTextEditorChanged(false);
                                 storageFileIsOpen = true;
-                                textEditor.setEnabled(true);
+                                textEditorSetEnabled(false);
                             } catch (IOException |
                                     NoSuchAlgorithmException |
                                     NoSuchPaddingException |
@@ -523,9 +552,9 @@ public class MainActivity extends Activity {
                     try {
                         String clearText = decryptStorageFile(difficultPassword);
                         textEditor.setText(clearText);
-                        textEditorChanged = false;
+                        setTextEditorChanged(false);
                         storageFileIsOpen = true;
-                        textEditor.setEnabled(true);
+                        textEditorSetEnabled(false);
                     } catch (IOException |
                             NoSuchAlgorithmException |
                             NoSuchPaddingException |
@@ -544,7 +573,7 @@ public class MainActivity extends Activity {
             // for the sake of mind
             AlertDialog.Builder adYesNo = new AlertDialog.Builder(this);
             String text = textEditorChanged ? "This will fully close the app." +
-                    "Unsaved data will be lost." : "This will fully close the app, even from recent apps.";
+                    "\n\nUnsaved data will be lost." : "This will fully close the app.";
             adYesNo.setMessage(text + "\n\nContinue?");
             adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
                 @Override
@@ -560,6 +589,29 @@ public class MainActivity extends Activity {
                 }
             });
             adYesNo.show();
+        }
+    }
+
+    // switch edit mode for textEditor
+    void textEditorSetEnabled(boolean enable) {
+        if ( enable ) {
+            saveButton.setText("Save");
+            textEditor.setFocusableInTouchMode(true);
+            textEditor.setKeyListener(new EditText(getApplicationContext()).getKeyListener());
+            textEditor.setFocusable(true);
+            textEditor.setCursorVisible(true);
+            textEditor.requestFocus();
+            textEditor.getBackground().setColorFilter(Color.WHITE, PorterDuff.Mode.SRC_ATOP);
+        } else {
+            saveButton.setText("Edit");
+            textEditor.setFocusableInTouchMode(false);
+            textEditor.clearFocus();
+            textEditor.setKeyListener(null);
+            textEditor.setFocusable(false);
+            textEditor.setCursorVisible(false);
+            textEditor.getBackground().setColorFilter(Color.YELLOW, PorterDuff.Mode.SRC_ATOP);
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(textEditor.getWindowToken(), 0);
         }
     }
 
@@ -614,7 +666,7 @@ public class MainActivity extends Activity {
         cos.close();
         tis.close();
         // there is not editor dirty flag after saving data
-        textEditorChanged = false;
+        setTextEditorChanged(false);
         // update data storage sile size
         File file = new File(storageFileName);
         storageFileSize = file.length();
