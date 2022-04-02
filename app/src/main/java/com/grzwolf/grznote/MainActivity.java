@@ -13,12 +13,18 @@ import android.graphics.PorterDuff;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.text.Editable;
+import android.text.Layout;
+import android.text.Spannable;
+import android.text.SpannableString;
 import android.text.TextWatcher;
+import android.text.style.BackgroundColorSpan;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ScrollView;
+import android.widget.TextView;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -46,6 +52,9 @@ public class MainActivity extends Activity {
     Button   exitButton, saveButton, openButton;
     EditText textEditor; // initially text edit is disabled via android:enabled="false" in layout xml
 
+    // scroll text to a certain position
+    ScrollView textEditorScroller = null;
+
     // dlg shall be dismissed, if going to pause
     AlertDialog alertSaveChanges = null;
 
@@ -62,6 +71,9 @@ public class MainActivity extends Activity {
         saveButton.setTextColor(hasChanged ? Color.RED : Color.BLACK);
         textEditorChanged = hasChanged;
     }
+
+    // most recent search input string
+    String searchInputString = "";
 
     // pwd TIMEOUT timer: 2min = 120s = 120.000ms
     static final long PWD_TIMEOUT = 120000;
@@ -143,6 +155,9 @@ public class MainActivity extends Activity {
         openButton = (Button) findViewById(R.id.openButton);
         textEditor = (EditText) findViewById(R.id.text);
 
+        // scroll text to a certain position
+        textEditorScroller = (ScrollView) findViewById(R.id.scrollerMain);
+
         // text editor change listener
         textEditor.addTextChangedListener(new TextWatcher() {
             public void afterTextChanged(Editable s) {
@@ -153,6 +168,59 @@ public class MainActivity extends Activity {
             }
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+        });
+
+        // long press event handler shall start text search in textEditor
+        textEditor.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                // only allow text search in locked mode (in edit mode, it would interfere with context menu)
+                if ( !textEditor.isFocusable() && textEditor.getText().length() > 0 ) {
+                    final EditText searchInput = new EditText(MainActivity.this);
+                    searchInput.setText(searchInputString);
+                    // search text input dialog
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("Search")
+                            .setView(searchInput)
+                            .setPositiveButton("Ok", new DialogInterface.OnClickListener() {
+                                public void onClick(DialogInterface dialog, int whichButton) {
+                                    searchInputString = searchInput.getText().toString();
+                                    // set highlighted text: https://stackoverflow.com/questions/22890075/android-edittext-highlight-multiple-words-in-the-text
+                                    String tvt = textEditor.getText().toString();
+                                    int ofe = tvt.indexOf(searchInputString, 0);
+                                    Spannable WordtoSpan = new SpannableString(textEditor.getText());
+                                    int firstMatchPosition = -1;
+                                    for ( int ofs = 0; ofs < tvt.length() && ofe != -1; ofs = ofe + 1 ) {
+                                        ofe = tvt.indexOf(searchInputString, ofs);
+                                        if ( ofe == -1 ) {
+                                            break;
+                                        } else {
+                                            if ( firstMatchPosition == -1 ) {
+                                                firstMatchPosition = ofe;
+                                            }
+                                            WordtoSpan.setSpan(new BackgroundColorSpan(Color.GREEN), ofe, ofe + searchInputString.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                                            textEditor.setText(WordtoSpan, TextView.BufferType.SPANNABLE);
+                                            setTextEditorChanged(false);
+                                        }
+                                    }
+                                    // let textEditor scroll to first matching position
+                                    if ( firstMatchPosition != -1 ) {
+                                        textEditor.setSelection(firstMatchPosition);
+                                        Layout layout = textEditor.getLayout();
+                                        textEditorScroller.scrollTo(0, layout.getLineTop(layout.getLineForOffset(firstMatchPosition)));
+                                    } else {
+                                        okBox("Text search","'" + searchInputString + "' not found");
+                                    }
+                                }
+                            })
+                            .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+                                public void onClick(DialogInterface dialog, int whichButton) {
+                                }
+                            }).show();
+                    return true;
+                }
+                return false;
             }
         });
 
@@ -555,6 +623,7 @@ public class MainActivity extends Activity {
                                 InvalidKeyException exc) {
                             setErrorCounterPassword(getErrorCounterPassword() + 1);
                             difficultPassword = "";
+                            textEditorSetEnabled(false);
                             okBox("Error Password", "Something went wrong.");
                         }
                     }
@@ -563,6 +632,7 @@ public class MainActivity extends Activity {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         difficultPassword = "";
+                        textEditorSetEnabled(false);
                         dialog.cancel();
                     }
                 });
@@ -590,6 +660,7 @@ public class MainActivity extends Activity {
                                     NoSuchPaddingException |
                                     InvalidKeyException exc) {
                                 difficultPassword = "";
+                                textEditorSetEnabled(false);
                                 okBox("Error Password", "Something went wrong.");
                             }
                         }
@@ -616,6 +687,7 @@ public class MainActivity extends Activity {
                             NoSuchPaddingException |
                             InvalidKeyException exc) {
                         difficultPassword = "";
+                        textEditorSetEnabled(false);
                         okBox("Error Password", "Something went wrong.");
                     }
                 }
