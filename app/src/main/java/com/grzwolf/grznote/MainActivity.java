@@ -46,6 +46,9 @@ public class MainActivity extends Activity {
     Button   exitButton, saveButton, openButton;
     EditText textEditor; // initially text edit is disabled via android:enabled="false" in layout xml
 
+    // dlg shall be dismissed, if going to pause
+    AlertDialog alertSaveChanges = null;
+
     // status vars
     boolean  textEditorChanged = false;
     boolean  storageFileIsOpen = false;
@@ -244,6 +247,10 @@ public class MainActivity extends Activity {
         long pausedStart = preferences.getLong("LatestUserActivityTime", -1);
         if ( pausedStart == -1 ) {
             return;
+        }
+        // avoid confusion after onPause --> onResume with a previously open 'save changes dialog'
+        if ( alertSaveChanges != null && alertSaveChanges.isShowing() && textEditorPauseContent.length() > 0 ) {
+            alertSaveChanges.cancel();
         }
         // password TIMEOUT check
         if ( System.currentTimeMillis() - pausedStart >= PWD_TIMEOUT ) {
@@ -512,9 +519,9 @@ public class MainActivity extends Activity {
                     dialog.cancel();
                 }
             });
-            AlertDialog alert = adYesNoCancel.create();
-            alert.show();
-            alert.setCanceledOnTouchOutside(false);
+            alertSaveChanges = adYesNoCancel.create();
+            alertSaveChanges.show();
+            alertSaveChanges.setCanceledOnTouchOutside(false);
         }
 
         // decrypted file open handling
