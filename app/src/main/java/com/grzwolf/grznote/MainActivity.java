@@ -52,6 +52,7 @@ public class MainActivity extends Activity {
     long     storageFileSize = 0;
     boolean  appIsHardClosing = false;
     boolean  wentThruOnCreate = false;
+    String   textEditorPauseContent = "";
 
     // indicate editor dirty flag as button text color
     void setTextEditorChanged(boolean hasChanged) {
@@ -190,15 +191,21 @@ public class MainActivity extends Activity {
     protected void onPause() {
         // two cases when coming here:
         if ( appIsHardClosing ) {
-            // 1.) hard close app after regular close button OR reset app after too many pwd fails
+            // hard close app after regular close button OR reset app after too many pwd fails
             SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
             SharedPreferences.Editor edit = preferences.edit();
             edit.putLong("LatestUserActivityTime", -1);
             edit.apply();
         } else {
-            // 2.) simple pause shall record the time when it happens to allow a password expire TIMEOUT
+            // if editor text was changed, save it temporarily (will be later handled in onResume / checkPwdTimeout, if pwd is not expired)
+            textEditorPauseContent = "";
+            if ( textEditorChanged ) {
+                textEditorPauseContent = textEditor.getText().toString();
+            }
+            // make editor text disappear from view in recent apps
             textEditor.setText("");
             setTextEditorChanged(false);
+            // simple pause shall record the time when it happens to allow a password expire TIMEOUT
             recordUserActivityTime();
         }
         super.onPause();
@@ -243,9 +250,19 @@ public class MainActivity extends Activity {
             // lock password & file status settings
             resetPwd();
         } else {
-            // simply show file content again: this path only happens after pause --> resume with no pwd timeout
+            // show text editor text again after pause: this path only happens after pause --> resume with no pwd timeout
             if ( openFile ) {
-                openButton.performClick();
+                // 'textEditorPauseContent.length() > 0' indicates, that there had been text changes before onPause
+                if ( textEditorPauseContent.length() > 0 ) {
+                    textEditor.setText(textEditorPauseContent);
+                    textEditorPauseContent = "";
+                    setTextEditorChanged(true);
+                    storageFileIsOpen = true;
+                    textEditorSetEnabled(true);
+                } else {
+                    // otherwise simply re open storage file
+                    openButton.performClick();
+                }
             }
         }
     }
