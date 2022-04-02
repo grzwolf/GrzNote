@@ -98,7 +98,9 @@ public class MainActivity extends Activity {
                             dialog.dismiss();
                         }
                     });
-                    builder.show();
+                    AlertDialog alert = builder.create();
+                    alert.show();
+                    alert.setCanceledOnTouchOutside(false);
                 }
             });
             // ... 2) simply go ahead with reminder
@@ -115,7 +117,9 @@ public class MainActivity extends Activity {
                     setErrorCounterPassword(0);
                 }
             });
-            adYesNoCont.show();
+            AlertDialog alert = adYesNoCont.create();
+            alert.show();
+            alert.setCanceledOnTouchOutside(false);
         }
     }
 
@@ -320,11 +324,27 @@ public class MainActivity extends Activity {
             // user interaction
             recordUserActivityTime();
 
-            // if editor is not yet enabled
+            // if editor is not yet enabled, ask whether to enable it
             if ( !textEditor.isFocusable() ) {
-                // if file is open, toggle button text from "Edit" to "Save" and enable edit mode
+                // only if file is open, toggle button text from "Edit" to "Save" and enable edit mode
                 if ( storageFileIsOpen ) {
-                    textEditorSetEnabled(true);
+                    AlertDialog.Builder adYesNo = new AlertDialog.Builder(this);
+                    adYesNo.setMessage("This will enable the edit mode.\n\nContinue?");
+                    adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            textEditorSetEnabled(true);
+                        }
+                    });
+                    adYesNo.setNegativeButton("No", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            dialog.cancel();
+                        }
+                    });
+                    AlertDialog alert = adYesNo.create();
+                    alert.show();
+                    alert.setCanceledOnTouchOutside(false);
                 }
                 return;
             }
@@ -365,7 +385,7 @@ public class MainActivity extends Activity {
                                 // saving an empty text could be intentional, mostly isn't
                                 if ( clearTextString.length() == 0 ) {
                                     AlertDialog.Builder adYesNo = new AlertDialog.Builder(MainActivity.this);
-                                    adYesNo.setMessage("Current text is empty. Continue anyway?");
+                                    adYesNo.setMessage("Current text is empty.\n\nYou sure to continue anyway?");
                                     adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
                                         @Override
                                         public void onClick(DialogInterface dialog, int which) {
@@ -387,7 +407,9 @@ public class MainActivity extends Activity {
                                             dialog.cancel();
                                         }
                                     });
-                                    adYesNo.show();
+                                    AlertDialog alert = adYesNo.create();
+                                    alert.show();
+                                    alert.setCanceledOnTouchOutside(false);
                                 } else {
                                     try {
                                         encryptStorageFile(clearTextString, difficultPassword);
@@ -409,7 +431,9 @@ public class MainActivity extends Activity {
                                 dialog.cancel();
                             }
                         });
-                        ad.show();
+                        AlertDialog alert = ad.create();
+                        alert.show();
+                        alert.setCanceledOnTouchOutside(false);
                         // repeat welcome screen on top of the pwd dlg only at first usage
                         firstDataUsage();
                     } else {
@@ -440,7 +464,9 @@ public class MainActivity extends Activity {
                                     dialog.cancel();
                                 }
                             });
-                            adYesNo.show();
+                            AlertDialog alert = adYesNo.create();
+                            alert.show();
+                            alert.setCanceledOnTouchOutside(false);
                         } else {
                             try {
                                 encryptStorageFile(clearTextString, difficultPassword);
@@ -469,7 +495,9 @@ public class MainActivity extends Activity {
                     dialog.cancel();
                 }
             });
-            adYesNoCancel.show();
+            AlertDialog alert = adYesNoCancel.create();
+            alert.show();
+            alert.setCanceledOnTouchOutside(false);
         }
 
         // decrypted file open handling
@@ -514,7 +542,9 @@ public class MainActivity extends Activity {
                         dialog.cancel();
                     }
                 });
-                ad.show();
+                AlertDialog alert = ad.create();
+                alert.show();
+                alert.setCanceledOnTouchOutside(false);
                 // repeat welcome screen on the top of the pwd dlg at first usage
                 firstDataUsage();
             } else {
@@ -546,7 +576,9 @@ public class MainActivity extends Activity {
                             dialog.cancel();
                         }
                     });
-                    adYesNo.show();
+                    AlertDialog alert = adYesNo.create();
+                    alert.show();
+                    alert.setCanceledOnTouchOutside(false);
                 } else {
                     // there is a pwd and the text editor has no changes: simply open the decrypted file and show it
                     try {
@@ -588,7 +620,9 @@ public class MainActivity extends Activity {
                     dialog.cancel();
                 }
             });
-            adYesNo.show();
+            AlertDialog alert = adYesNo.create();
+            alert.show();
+            alert.setCanceledOnTouchOutside(false);
         }
     }
 
@@ -722,7 +756,9 @@ public class MainActivity extends Activity {
                 dialog.dismiss();
             }
         });
-        builder.show();
+        AlertDialog alert = builder.create();
+        alert.show();
+        alert.setCanceledOnTouchOutside(false);
     }
 
     // ask whether to 'show again' in an alert box
@@ -749,7 +785,9 @@ public class MainActivity extends Activity {
                 spe.apply();
             }
         });
-        builder.create().show();
+        AlertDialog alert = builder.create();
+        alert.show();
+        alert.setCanceledOnTouchOutside(false);
     }
 
     // messagebox at first data usage
