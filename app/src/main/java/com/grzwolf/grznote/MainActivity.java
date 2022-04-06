@@ -23,6 +23,7 @@ import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -50,8 +51,8 @@ public class MainActivity extends Activity {
 
     // UI controls to interact with
     EditText    textEditor;
+    ImageButton saveButton;
     Button      exitButton,
-                saveButton,
                 openButton;
     ScrollView  textEditorScroller = null;// scroll text to a certain position
     AlertDialog alertSaveChanges = null;  // specific dlg to dismiss, if going to pause
@@ -67,9 +68,21 @@ public class MainActivity extends Activity {
     boolean getTextEditorDirty() {        // textEditor dirty flag getter & setter: indicates editor dirty status as 'save button' text color
         return textEditorDirty;
     }
-    void setTextEditorDirty(boolean hasChanged) {
-        saveButton.setTextColor(hasChanged ? Color.RED : Color.BLACK);
-        textEditorDirty = hasChanged;
+    void setTextEditorDirty(boolean isDirty) {
+        textEditorDirty = isDirty;
+        if ( isDirty ) {
+            // alert color save icon
+            saveButton.setImageResource(android.R.drawable.ic_menu_save);
+            saveButton.setBackgroundColor(Color.YELLOW);
+            saveButton.setColorFilter(Color.BLACK, PorterDuff.Mode.SRC_ATOP);
+        } else {
+            // green color lock icon (read only mode)
+            saveButton.setBackgroundColor(Color.BLACK);
+            if ( storageFileIsOpen ) {
+                saveButton.setImageResource(android.R.drawable.ic_lock_lock);
+                saveButton.setColorFilter(Color.GREEN, PorterDuff.Mode.SRC_ATOP);
+            }
+        }
     }
 
     int errorCounterPassword = 0;         // 'password error' counter
@@ -104,10 +117,10 @@ public class MainActivity extends Activity {
         wentThruOnCreate = true;
 
         // init active controls
-        exitButton = (Button) findViewById(R.id.exitButton);
-        saveButton = (Button) findViewById(R.id.saveButton);
-        openButton = (Button) findViewById(R.id.openButton);
         textEditor = (EditText) findViewById(R.id.text);
+        saveButton = (ImageButton) findViewById(R.id.saveButton);
+        exitButton = (Button) findViewById(R.id.exitButton);
+        openButton = (Button) findViewById(R.id.openButton);
 
         // scroll text to a certain position
         textEditorScroller = (ScrollView) findViewById(R.id.scrollerMain);
@@ -405,10 +418,6 @@ public class MainActivity extends Activity {
         if ( pausedStart == -1 ) {
             return;
         }
-        // avoid confusion after onPause --> onResume with a previously open 'save changes dialog'
-        if ( alertSaveChanges != null && alertSaveChanges.isShowing() && textEditorPauseContent.length() > 0 ) {
-            alertSaveChanges.cancel();
-        }
         // password TIMEOUT check
         if ( System.currentTimeMillis() - pausedStart >= PWD_TIMEOUT ) {
             // lock password & file status settings
@@ -418,11 +427,15 @@ public class MainActivity extends Activity {
             if ( openFile ) {
                 // 'textEditorPauseContent.length() > 0' indicates, that there had been text changes before onPause
                 if ( textEditorPauseContent.length() > 0 ) {
+                    // avoid confusion after onPause --> onResume with a previously open 'save changes dialog'
+                    if ( alertSaveChanges != null && alertSaveChanges.isShowing() ) {
+                        alertSaveChanges.cancel();
+                    }
                     textEditor.setText(textEditorPauseContent);
                     textEditorPauseContent = "";
-                    setTextEditorDirty(true);
                     storageFileIsOpen = true;
                     setTextEditorEditmode(true);
+                    setTextEditorDirty(true);
                 } else {
                     // otherwise simply re open storage file
                     openButton.performClick();
@@ -447,13 +460,17 @@ public class MainActivity extends Activity {
                     edit.apply();
                     // reset pwd
                     difficultPassword = "";
+                    // in case, the save data dlg was open
+                    if ( alertSaveChanges != null && alertSaveChanges.isShowing() ) {
+                        alertSaveChanges.cancel();
+                    }
+                    // reset file status
+                    storageFileIsOpen = false;
+                    storageFileSize = 0;
                     // reset text editor
                     textEditor.setText("");
                     setTextEditorDirty(false);
                     setTextEditorEditmode(false);
-                    // reset file status
-                    storageFileIsOpen = false;
-                    storageFileSize = 0;
                     // fire open file dlg (will ask for pwd, if ok starts pwd timer)
                     openButton.performClick();
                     // put TIMEOUT info on top of file open procedure
@@ -479,7 +496,7 @@ public class MainActivity extends Activity {
     void dlgSaveData() {
         recordUserActivityTime();
         AlertDialog.Builder adYesNoCancel = new AlertDialog.Builder(this);
-        adYesNoCancel.setMessage("The current text will be saved to the data file.\n\n" +
+        adYesNoCancel.setMessage("The current text will be saved.\n\n" +
                 "Yes       = save changes\n" +
                 "Cancel = continue edit\n" +
                 "No         = discard changes");
@@ -634,10 +651,12 @@ public class MainActivity extends Activity {
         alert.show();
         alert.setCanceledOnTouchOutside(false);
     }
-    // method to switch edit mode for textEditor
+    // method to toggle 'edit mode' vs. 'read mode' for textEditor
     void setTextEditorEditmode(boolean enable) {
         if ( enable ) {
-            saveButton.setText("Save");
+            saveButton.setBackgroundColor(Color.LTGRAY);
+            saveButton.setImageResource(android.R.drawable.ic_menu_edit);
+            saveButton.setColorFilter(Color.parseColor("#ff4444"), PorterDuff.Mode.SRC_ATOP);
             textEditor.setFocusableInTouchMode(true);
             textEditor.setKeyListener(new EditText(getApplicationContext()).getKeyListener());
             textEditor.setFocusable(true);
@@ -645,7 +664,11 @@ public class MainActivity extends Activity {
             textEditor.requestFocus();
             textEditor.getBackground().setColorFilter(Color.WHITE, PorterDuff.Mode.SRC_ATOP);
         } else {
-            saveButton.setText("Edit");
+            saveButton.setBackgroundColor(Color.BLACK);
+            if ( storageFileIsOpen ) {
+                saveButton.setImageResource(android.R.drawable.ic_lock_lock);
+                saveButton.setColorFilter(Color.GREEN, PorterDuff.Mode.SRC_ATOP);
+            }
             textEditor.setFocusableInTouchMode(false);
             textEditor.clearFocus();
             textEditor.setKeyListener(null);
@@ -732,14 +755,14 @@ public class MainActivity extends Activity {
         try {
             // read from encrypted file, decrypt data and show them
             String clearText = decryptStorageFile(difficultPassword);
+            // data storage file is now open
+            storageFileIsOpen = true;
             // if app flow goes here, there was at least a pwd success
             setErrorCounterPassword(0);
             // set clear text to textEditor
             textEditor.setText(clearText);
             // clear editor dirty flag after setting the data to editor from file
             setTextEditorDirty(false);
-            // data storage file is now open
-            storageFileIsOpen = true;
             // disable edit mode after file open & toggle 'Save/Edit' button text to "Edit"
             setTextEditorEditmode(false);
             // start pwd timeout timer

@@ -9,7 +9,7 @@ android {
         minSdkVersion 25
         targetSdkVersion 31
         versionCode 1
-        versionName "1.1.0"
+        versionName "1.1.1"
         archivesBaseName = "GrzNote"
         setProperty("archivesBaseName", applicationId + "_"+ versionName)
     }

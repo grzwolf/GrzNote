@@ -37,30 +37,30 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
-
         <Button
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
             android:text="Open"
             android:id="@+id/openButton"
-            android:layout_weight="1"
-            android:onClick="buttonAction"/>
+            android:onClick="buttonAction"
+            android:layout_width="match_parent"
+            android:layout_height="47dp"
+            android:layout_weight="1" />
 
-        <Button
+        <ImageButton
             android:id="@+id/saveButton"
+            style="@android:style/Widget.Material.Light.Button.Borderless"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginTop="1dp"
             android:layout_weight="1"
-            android:onClick="buttonAction"
-            android:text="Edit" />
+            android:onClick="buttonAction" />
 
         <Button
+            android:text="Close"
             android:id="@+id/exitButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
             android:onClick="buttonAction"
-            android:text="Close" />
+            android:layout_width="match_parent"
+            android:layout_height="47dp"
+            android:layout_weight="1" />
     </LinearLayout>
- 
+
 </LinearLayout>
