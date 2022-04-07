@@ -34,9 +34,15 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Date;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -113,6 +119,9 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
         this.setTitle("GrzNote " + BuildConfig.VERSION_NAME);
 
+        // backup storage file once a day at first app start
+        generateDailyBackupFile();
+
         // a flag is needed to distinguish, whether the app is really started OR just resumed
         wentThruOnCreate = true;
 
@@ -172,6 +181,7 @@ public class MainActivity extends Activity {
         // friendly reminder
         dlgDontShowAgain("Your password is not stored anywhere.",
                 new CharSequence[] {"Don't show again", "Show again"},
+                1,
                 "DontShowAgain");
     }
     @Override
@@ -272,7 +282,7 @@ public class MainActivity extends Activity {
         recordUserActivityTime();
         // now there are three choices ...
         AlertDialog.Builder adYesNoCont = new AlertDialog.Builder(this);
-        adYesNoCont.setMessage("Error password > 5\n\nStart from scratch with a new data file and delete the old data file?");
+        adYesNoCont.setMessage("Error password > 5\n\nStart from scratch with a new data file and delete old the data file and backups?");
         // ... 1) option to delete the data storage file encrypted with an unknown password and restart app
         adYesNoCont.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
             @Override
@@ -303,7 +313,7 @@ public class MainActivity extends Activity {
     void dlgYouSureAppResetToDefault() {
         AlertDialog.Builder builder = null;
         builder = new AlertDialog.Builder(MainActivity.this);
-        builder.setTitle("Reset GrzNote");
+        builder.setTitle("Reset GrzNote and its backups");
         builder.setMessage("\nAre you sure?");
         builder.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
             public void onClick(DialogInterface dialog, int which) {
@@ -332,7 +342,14 @@ public class MainActivity extends Activity {
         String appName = getApplicationInfo().loadLabel(getPackageManager()).toString();
         String storageFileName = storagePath + "/" + appName;
         File file = new File(storageFileName);
-        file.delete();
+        try {
+            file.delete();
+        } catch (Exception e) {}
+        // delete all backup files
+        String storageBakPath = storagePath + "/bak";
+        File folderToScan = new File(storageBakPath);
+        ArrayList<File> listOfBakFiles = getFolderFilesByExtension(folderToScan, ".bak");
+        deleteAllExcept(listOfBakFiles, ".bak", 0);
         // restart app from scratch, credits: https://stackoverflow.com/questions/46070938/restarting-android-app-programmatically/71392776#71392776
         try {
             Context ctx = getApplicationContext();
@@ -450,27 +467,8 @@ public class MainActivity extends Activity {
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    // stop pwd timer
-                    pwdTimer.cancel();
-                    pwdTimer = null;
-                    // avoid potential confusion after restart pwd timer
-                    SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
-                    SharedPreferences.Editor edit = preferences.edit();
-                    edit.putLong("LatestUserActivityTime", -1);
-                    edit.apply();
-                    // reset pwd
-                    difficultPassword = "";
-                    // in case, the save data dlg was open
-                    if ( alertSaveChanges != null && alertSaveChanges.isShowing() ) {
-                        alertSaveChanges.cancel();
-                    }
-                    // reset file status
-                    storageFileIsOpen = false;
-                    storageFileSize = 0;
-                    // reset text editor
-                    textEditor.setText("");
-                    setTextEditorDirty(false);
-                    setTextEditorEditmode(false);
+                    // stop pwd timer, reset pwd, clear editor
+                    clearUiStatus();
                     // fire open file dlg (will ask for pwd, if ok starts pwd timer)
                     openButton.performClick();
                     // put TIMEOUT info on top of file open procedure
@@ -488,6 +486,31 @@ public class MainActivity extends Activity {
         SharedPreferences.Editor edit = preferences.edit();
         edit.putLong("LatestUserActivityTime", time);
         edit.apply();
+    }
+    void clearUiStatus() {
+        // stop pwd timer
+        if ( pwdTimer != null ) {
+            pwdTimer.cancel();
+            pwdTimer = null;
+        }
+        // avoid potential confusion after restart pwd timer
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
+        SharedPreferences.Editor edit = preferences.edit();
+        edit.putLong("LatestUserActivityTime", -1);
+        edit.apply();
+        // reset pwd
+        difficultPassword = "";
+        // cancel it in case, the save data dlg was open
+        if ( alertSaveChanges != null && alertSaveChanges.isShowing() ) {
+            alertSaveChanges.cancel();
+        }
+        // reset file status
+        storageFileIsOpen = false;
+        storageFileSize = 0;
+        // reset text editor
+        textEditor.setText("");
+        setTextEditorDirty(false);
+        setTextEditorEditmode(false);
     }
 
     //
@@ -586,8 +609,16 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(DialogInterface dialog, int which) {
                 difficultPassword = pwdEditor.getText().toString();
-                difficultPassword = pwdModder(difficultPassword);
-                readTextFromFileIntoEditor();
+                if ( difficultPassword.equals("restore") ) {
+                    // restore from backup
+                    difficultPassword = "";
+                    setTextEditorEditmode(false);
+                    dlgRestoreFromBackup();
+                } else {
+                    // regular file open
+                    difficultPassword = pwdModder(difficultPassword);
+                    readTextFromFileIntoEditor();
+                }
             }
         });
         ad.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
@@ -622,6 +653,10 @@ public class MainActivity extends Activity {
         adYesNo.setNegativeButton("No", new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
+                if ( !getTextEditorDirty() ) {
+                    // clear UI, if editor is not dirty: allows restore from a backup w/o app restart
+                    clearUiStatus();
+                }
                 dialog.cancel();
             }
         });
@@ -833,7 +868,7 @@ public class MainActivity extends Activity {
     }
 
     // ask whether to 'show again' in an alert box
-    void dlgDontShowAgain(String title, CharSequence[] items, String prefKeyString) {
+    void dlgDontShowAgain(String title, CharSequence[] items, int select, String prefKeyString) {
         SharedPreferences sharedPref = PreferenceManager.getDefaultSharedPreferences(this);
         if ( sharedPref.getBoolean(prefKeyString, false) ) {
             return;
@@ -841,7 +876,7 @@ public class MainActivity extends Activity {
         AlertDialog.Builder builder = null;
         builder = new AlertDialog.Builder(MainActivity.this);
         builder.setTitle(title);
-        final int[] selected = {1};
+        final int[] selected = {select};
         builder.setSingleChoiceItems(items, selected[0], new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
@@ -874,8 +909,190 @@ public class MainActivity extends Activity {
                     "Create a password.\nLength: 4 ... 16 characters.\n\n" +
                             "You need to remember it, anytime you use this app.\n\n" +
                             "If you forget the password, your data are lost.\n\n" +
-                            "The password is not stored anywhere.");
+                            "The password is not stored anywhere.\n\n" +
+                            "At the 1st 'Open' per day a backup is auto generated, " +
+                            "accessible via 'Open', then type 'restore'.\n" +
+                            "A restored backup, uses the same password, " +
+                            "with that the backup was created with."
+                    );
         }
+    }
+
+    // backup storage file once a day & delete all bak except the 5 latest
+    void generateDailyBackupFile() {
+        // basics
+        String storagePath = this.getExternalFilesDir(null).getAbsolutePath();
+        String appName = getApplicationInfo().loadLabel(getPackageManager()).toString();
+        String storageFileName = storagePath + "/" + appName;
+        File fileOri = new File(storageFileName);
+        // simply return, if there is no app data file
+        if ( !fileOri.exists() ) {
+            return;
+        }
+        // make backup only once a day
+        String storageBakPath = storagePath + "/bak";
+        File path = new File(storageBakPath);
+        if ( !path.exists() ) {
+            path.mkdir();
+        }
+        String dateStamp = new SimpleDateFormat("yyyyMMdd").format(new Date());
+        String todayBackupFileName = storageBakPath + "/" + appName + "." + dateStamp + ".bak";
+        File fileBak = new File(todayBackupFileName);
+        if ( fileBak.exists() ) {
+            return;
+        }
+        // copy app data file to backup file
+        if ( !copyFile(fileOri, fileBak) ) {
+            okBox("Backup error", "Could not create backup file.");
+            return;
+        }
+        // get all backup files
+        File folderToScan = new File(storageBakPath);
+        ArrayList<File> listOfBakFiles = getFolderFilesByExtension(folderToScan, ".bak");
+        // delete all but most recent 5 bak files
+        deleteAllExcept(listOfBakFiles, ".bak", 5);
+    }
+    // this file copy methos works only in app data folder
+    boolean copyFile(File src, File dst) {
+        try {
+            InputStream in = new FileInputStream(src);
+            OutputStream out = new FileOutputStream(dst);
+            // Transfer bytes from in to out
+            byte[] buf = new byte[1024];
+            int len;
+            while ( (len = in.read(buf)) > 0 ) {
+                out.write(buf, 0, len);
+            }
+        } catch (IOException e) {
+            return false;
+        }
+        return true;
+    }
+    // get folder files by extension, credits: https://stackoverflow.com/questions/794381/how-to-find-files-that-match-a-wildcard-string-in-java
+    ArrayList<File> getFolderFilesByExtension(File folderToScan, String dotExtension) {
+        ArrayList<File> listOfFilesWithExt = new ArrayList();
+        if ( !folderToScan.exists() ) {
+            return listOfFilesWithExt;
+        }
+        File[] listOfFiles = folderToScan.listFiles();
+        for ( int i = 0; i < listOfFiles.length; i++ ) {
+            if ( listOfFiles[i].isFile() ) {
+                String bakFile = listOfFiles[i].getName();
+                if ( bakFile.endsWith(dotExtension) ) {
+                    listOfFilesWithExt.add(listOfFiles[i]);
+                }
+            }
+        }
+        return listOfFilesWithExt;
+    }
+    ArrayList<String> getFolderFileNamesByExtension(File folderToScan, String dotExtension) {
+        ArrayList<String> listOfFileNamesWithExt = new ArrayList();
+        if ( !folderToScan.exists() ) {
+            return listOfFileNamesWithExt;
+        }
+        File[] listOfFiles = folderToScan.listFiles();
+        for ( int i = 0; i < listOfFiles.length; i++ ) {
+            if ( listOfFiles[i].isFile() ) {
+                String bakFile = listOfFiles[i].getName();
+                if ( bakFile.endsWith(dotExtension) ) {
+                    listOfFileNamesWithExt.add(listOfFiles[i].getName());
+                }
+            }
+        }
+        return listOfFileNamesWithExt;
+    }
+    // delete oldest files but 'numKeep', credits: https://stackoverflow.com/questions/19589960/deleting-all-but-the-last-3-modified-files-in-a-directory
+    private static void deleteAllExcept(ArrayList<File> files, String ext, int numKeep) {
+        files.stream()
+                .filter((File p) -> p.getName().contains(ext))
+                .sorted(getReverseLastModifiedComparator())
+                .skip(numKeep)
+                .forEach(x -> ((File) x).delete());
+    }
+    private static Comparator<File> getReverseLastModifiedComparator() {
+        return (File o1, File o2) -> {
+            if ( o1.lastModified() < o2.lastModified() ) {
+                return 1;
+            }
+            if ( o1.lastModified() > o2.lastModified() ) {
+                return -1;
+            }
+            return 0;
+        };
+    }
+
+    // restore app file data from a backup file
+    public void dlgRestoreFromBackup() {
+        // get list of bak file names
+        String storagePath = this.getExternalFilesDir(null).getAbsolutePath();
+        String storageBakPath = storagePath + "/bak";
+        File folderToScan = new File(storageBakPath);
+        ArrayList<String> bakList = getFolderFileNamesByExtension(folderToScan, ".bak");
+        Collections.sort(bakList);
+        if ( bakList.size() == 0 ) {
+            okBox("Note", "No backup files available.\nApp only can use its original app data.");
+            return;
+        }
+        // dialog to select backup file
+        AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+        builder.setTitle("Restore from backup - select file");
+        final int[] selected = {0};
+        builder.setSingleChoiceItems(bakList.toArray(new CharSequence[bakList.size()]), selected[0], new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialogInterface, int which) {
+                selected[0] = which;
+            }
+        });
+        builder.setPositiveButton("Ok", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                String selectedFileName = bakList.get(selected[0]);
+                dlgRestoreFromBackupYouSure(selectedFileName);
+            }
+        });
+        builder.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                okBox("Restore cancelled", "App will use its original app data.");
+                dialog.cancel();
+            }
+        });
+        AlertDialog alert = builder.create();
+        alert.show();
+        alert.setCanceledOnTouchOutside(false);
+    }
+    // restore from backup you sure
+    public void dlgRestoreFromBackupYouSure(String selectedFileName) {
+        AlertDialog.Builder adYesNo = new AlertDialog.Builder(MainActivity.this);
+        adYesNo.setTitle("Restore from Backup");
+        adYesNo.setMessage("The backup file\n\n'" + selectedFileName + "'\n\nmight be outdated.\nThe backup replaces the most recent data file.\n\nYou sure to continue?");
+        adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                // override app data file 'GrzNote' with selected bak file
+                String storagePath = MainActivity.this.getExternalFilesDir(null).getAbsolutePath();
+                String appName = getApplicationInfo().loadLabel(getPackageManager()).toString();
+                String storageFileName = storagePath + "/" + appName;
+                File appFile = new File(storageFileName);
+                String storageBakPath = storagePath + "/bak";
+                File bakFile = new File(storageBakPath + "/" + selectedFileName);
+                if ( !copyFile(bakFile, appFile) ) {
+                    okBox("Restore error", "Could not restore backup file to app data file.");
+                    return;
+                }
+                // workflow info
+                okBox("Restore finished", "Continue with 'Open'.");
+            }
+        });
+        adYesNo.setNegativeButton("No", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                dialog.cancel();
+            }
+        });
+        AlertDialog alert = adYesNo.create();
+        alert.show();
+        alert.setCanceledOnTouchOutside(false);
     }
 
 }
