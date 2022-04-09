@@ -213,10 +213,16 @@ public class MainActivity extends Activity {
             // make editor text disappear from view in recent apps
             textEditor.setText("");
             setTextEditorDirty(false);
-            // simple pause shall record the time when it happens to allow a password expire TIMEOUT
+            // record the time when it happens to allow a password expire TIMEOUT
             recordUserActivityTime();
         }
         super.onPause();
+    }
+
+    // Android UI back button = 'Close' button, otherwise app is visible in recent apps
+    @Override
+    public void onBackPressed() {
+        dlgExitApp();
     }
 
     //
@@ -910,7 +916,7 @@ public class MainActivity extends Activity {
                             "You need to remember it, anytime you use this app.\n\n" +
                             "If you forget the password, your data are lost.\n\n" +
                             "The password is not stored anywhere.\n\n" +
-                            "At the 1st 'Open' per day a backup is auto generated, " +
+                            "At the 1st app start per day a backup is auto generated, " +
                             "accessible via 'Open', then type 'restore'.\n" +
                             "A restored backup, uses the same password, " +
                             "with that the backup was created with."
