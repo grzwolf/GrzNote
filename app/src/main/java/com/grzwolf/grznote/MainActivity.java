@@ -2,6 +2,7 @@ package com.grzwolf.grznote;
  
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -43,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -67,7 +69,7 @@ public class MainActivity extends Activity {
     boolean  storageFileIsOpen = false;   // prepare for accidental file override
     long     storageFileSize = 0;         // prepare for accidental file override
     boolean  appIsHardClosing = false;    // reset pref "LatestUserActivityTime"
-    boolean  wentThruOnCreate = false;    // allow checkPwdTimeout in onResume if no fresh start
+    boolean  wentThruOnCreate = false;    // allow checkPwdTimeout in onResume, if no fresh start
     String   textEditorPauseContent = ""; // if textEditorDirty, store the content of textEditor in onPause
 
     boolean  textEditorDirty = false;     // textEditor dirty flag
@@ -139,8 +141,6 @@ public class MainActivity extends Activity {
             public void afterTextChanged(Editable s) {
                 // simple text editor change/dirty flag
                 setTextEditorDirty(true);
-                // user interaction happened
-                recordUserActivityTime();
             }
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             public void onTextChanged(CharSequence s, int start, int before, int count) {
@@ -166,9 +166,9 @@ public class MainActivity extends Activity {
             @Override
             public boolean onTouch(View v, MotionEvent event) {
                 if ( event.getAction() == MotionEvent.ACTION_DOWN ) {
-                    // user interaction happened
                     if ( textEditor.isEnabled() ) {
-                        recordUserActivityTime();
+                        // tbd for later use
+                        ;
                     }
                 }
                 return false;
@@ -197,7 +197,7 @@ public class MainActivity extends Activity {
     }
     @Override
     protected void onPause() {
-        // two cases when coming here:
+        // two cases when coming here: a) app hard closing   b) app goes to background
         if ( appIsHardClosing ) {
             // hard close app after regular close button OR reset app after too many pwd fails
             SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
@@ -229,9 +229,6 @@ public class MainActivity extends Activity {
     // main user action (other than editing text, text search) takes place here
     //
     public void buttonAction(View v) {
-
-        // user interaction happened
-        recordUserActivityTime();
 
         // storage file save handling AND edit mode toggle
         if ( v.getId() == R.id.saveButton ) {
@@ -285,7 +282,6 @@ public class MainActivity extends Activity {
 
     // after 5x password error, ask whether to reset app to defaults (aka like fresh install)
     void dlgAppResetToDefault() {
-        recordUserActivityTime();
         // now there are three choices ...
         AlertDialog.Builder adYesNoCont = new AlertDialog.Builder(this);
         adYesNoCont.setMessage("Error password > 5\n\nStart from scratch with a new data file and delete old the data file and backups?");
@@ -371,7 +367,6 @@ public class MainActivity extends Activity {
 
     // ask user for search text, highlight it in textEditor and scroll to first match
     void dlgHighlightSearchText() {
-        recordUserActivityTime();
         final EditText searchInput = new EditText(MainActivity.this);
         searchInput.setText(searchInputString);
         // search text input dialog
@@ -416,7 +411,7 @@ public class MainActivity extends Activity {
     }
 
     //
-    // pwd expiration timer
+    // pwd expiration timer: runs even after onPaused, if app is in background
     //
     void startPwdTimer() {
         if ( pwdTimer != null ) {
@@ -440,6 +435,15 @@ public class MainActivity extends Activity {
         long pausedStart = preferences.getLong("LatestUserActivityTime", -1);
         if ( pausedStart == -1 ) {
             return;
+        }
+        // only if app runs in foreground, it should continue to work w/o pwd timeout --> make a user activity
+        if ( appIsInForeground(MainActivity.this) ) {
+            // exec a user activity
+            recordUserActivityTime();
+            // if not coming from onResume, simply return (avoid PWD timeout check) - otherwise allow the storage file to open if applicable
+            if ( !openFile ) {
+                return;
+            }
         }
         // password TIMEOUT check
         if ( System.currentTimeMillis() - pausedStart >= PWD_TIMEOUT ) {
@@ -518,12 +522,26 @@ public class MainActivity extends Activity {
         setTextEditorDirty(false);
         setTextEditorEditmode(false);
     }
+    // check whether app runs in foreground
+    boolean appIsInForeground(Context context) {
+        ActivityManager activityManager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        List<ActivityManager.RunningAppProcessInfo> runningAppProcesses = activityManager.getRunningAppProcesses();
+        if (runningAppProcesses == null) {
+            return false;
+        }
+        for (ActivityManager.RunningAppProcessInfo runningAppProcess : runningAppProcesses) {
+            if (runningAppProcess.processName.equals(context.getPackageName()) &&
+                    runningAppProcess.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     //
     // save data: top level dialog to save textEditor data to file
     //
     void dlgSaveData() {
-        recordUserActivityTime();
         AlertDialog.Builder adYesNoCancel = new AlertDialog.Builder(this);
         adYesNoCancel.setMessage("The current text will be saved.\n\n" +
                 "Yes       = save changes\n" +
@@ -561,7 +579,6 @@ public class MainActivity extends Activity {
     }
     // ask whether to discard unsaved data
     void dlgUnsavedDataLoss() {
-        recordUserActivityTime();
         AlertDialog.Builder adYesNo = new AlertDialog.Builder(this);
         adYesNo.setMessage("Unsaved changes will be lost. Continue?");
         adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
@@ -582,7 +599,6 @@ public class MainActivity extends Activity {
     }
     // ask whether to write an empty text into the storage file
     void dlgWriteEmptyTextToFile() {
-        recordUserActivityTime();
         AlertDialog.Builder adYesNo = new AlertDialog.Builder(MainActivity.this);
         adYesNo.setMessage("Current text is empty.\n\nYou sure to continue anyway?");
         adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
@@ -606,7 +622,6 @@ public class MainActivity extends Activity {
     // open data: ask for password, open storage file and show in textEditor
     //
     void dlgPasswordAndOpen() {
-        recordUserActivityTime();
         final EditText pwdEditor = new EditText(MainActivity.this);
         AlertDialog.Builder ad = new AlertDialog.Builder(MainActivity.this);
         ad.setView(pwdEditor);
@@ -673,7 +688,6 @@ public class MainActivity extends Activity {
 
     // ask whether to switch to edit mode of textEditor
     void dlgTextEditorSetEditmode() {
-        recordUserActivityTime();
         AlertDialog.Builder adYesNo = new AlertDialog.Builder(this);
         adYesNo.setMessage("This will enable the edit mode.\n\nContinue?");
         adYesNo.setPositiveButton("Yes", new DialogInterface.OnClickListener() {
